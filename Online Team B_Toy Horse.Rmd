@@ -1,0 +1,359 @@
+---
+title: "Toy Horse Main File"
+author: "MSBA Online Team B"
+date: "12/6/2020"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Load the data and any libraries as well as sourcing any .R software files. You should source your ConjointCode.R file
+
+```{r loadData}
+##Insert code to load the data here
+#set work dir
+setwd("/Users/jiayuanlin/Desktop/GBA 424/6/Case/Toyhouse")
+
+#load data 
+filenm = "GBA424 Fall 2020 - Toy Horse Case Data"
+load(paste(filenm,".Rdata",sep=""))
+
+#profiles 16
+#sample 200
+```
+
+
+\section{Part A: Regressions}
+Include here analysis that produces the part-utilities at the individual level. These will be data to pass to part B. In addition, use these estimates to do the predictions of the missing profiles and to create a complete set of profile ratings to be used in part D. 
+
+```{r individualLevelRegressions}
+###Insert code here
+partworths = matrix(nrow=nrow(respondentData),ncol=ncol(conjointData)-2)
+for(i in 1:nrow(respondentData)){ #for each individual run the regression
+  partworths[i,]=lm(ratings~.,subset(conjointData, ID == i)[, -c(1,2)])$coef
+}
+atts = c("price","height","motion", "style")
+colnames(partworths) = c("Intercept",atts)
+
+conjointDataf = cbind(rep(1,nrow(conjointData)),conjointData[,-c(1:3)]) ##add column for constant
+partworths.full = matrix(rep(partworths,each=16),ncol=5)
+pratings = rowSums(conjointDataf*partworths.full)
+finalratings = ifelse(is.na(conjointData$ratings),pratings,conjointData$ratings)
+conjointData$ratings <- finalratings 
+```
+
+\section{Part B: Post-hoc Segmentation}
+
+In this section, wse cluster analysis on the part-utilities (including the constant) to identify the best post-hoc segmentation scheme. Test at least two cluster analysis schemes (i.e., number of clusters) and select the best one in your view. Justify this decision. Then profile the segments in the chosen scheme and identify the ideal product for each segment. See if you can identify any other strategic issues arising from the segmentation (e.g., menu pricing opportunities, competitive considerations, target/customization).
+
+```{r postHocSegmentation}
+##Insert code here
+# install.packages('fpc')
+# install.packages('factoextra')
+require("cluster")
+require("fpc")
+require("factoextra")
+require("gridExtra")
+library(cluster)
+library(fpc)
+library(factoextra)
+library(gridExtra)
+library(data.table)
+
+set.seed(1234) # set random number seed before doing cluster analysis
+toClust = partworths[,1:5] # select the relevant data for clustering
+colnames(toClust) <- c("intercept","price_low","height_26","motion_rocking","style_glamorous")
+
+##Evaluate number of clusters to use on data with visualizations
+##  to create visualizations need to print tmp
+clustTest = function(toClust,print=TRUE,scale=TRUE,maxClusts=15,seed=12345,nstart=20,iter.max=100){
+  if(scale){ toClust = scale(toClust);}
+  set.seed(seed);   # set random number seed before doing cluster analysis
+  wss <- (nrow(toClust)-1)*sum(apply(toClust,2,var))
+  for (i in 2:maxClusts) wss[i] <- sum(kmeans(toClust,centers=i,nstart=nstart,iter.max=iter.max)$withinss)
+  ##gpw essentially does the following plot using wss above. 
+  #plot(1:maxClusts, wss, type="b", xlab="Number of Clusters",ylab="Within groups sum of squares")
+  gpw = fviz_nbclust(toClust,kmeans,method="wss",iter.max=iter.max,nstart=nstart,k.max=maxClusts) #alternative way to get wss elbow chart.
+  pm1 = pamk(toClust,scaling=TRUE)
+  ## pm1$nc indicates the optimal number of clusters based on 
+  ## lowest average silhoutte score (a measure of quality of clustering)
+  #alternative way that presents it visually as well.
+  gps = fviz_nbclust(toClust,kmeans,method="silhouette",iter.max=iter.max,nstart=nstart,k.max=maxClusts) 
+  if(print){
+    grid.arrange(gpw,gps, nrow = 1)
+  }
+  list(wss=wss,pm1=pm1$nc,gpw=gpw,gps=gps)
+}
+
+
+##Runs a set of clusters as kmeans
+runClusts = function(toClust,nClusts,print=TRUE,maxClusts=15,seed=12345,nstart=20,iter.max=100){
+  if(length(nClusts)>4){
+    warning("Using only first 4 elements of nClusts.")
+  }
+  kms=list(); ps=list();
+  for(i in 1:length(nClusts)){
+    kms[[i]] = kmeans(toClust,nClusts[i],iter.max = iter.max, nstart=nstart)
+    ps[[i]] = fviz_cluster(kms[[i]], geom = "point", data = toClust) + ggtitle(paste("k =",nClusts[i]))
+   
+  }
+  library(gridExtra)
+  if(print){
+    tmp = marrangeGrob(ps, nrow = 2,ncol=2)
+    print(tmp)
+  }
+  list(kms=kms,ps=ps)
+}
+
+
+##Plots a kmeans cluster as three plot report
+plotClust = function(km,toClust,
+                     discPlot=FALSE,standardize=TRUE,margins = c(7,4,4,2)){
+  nc = length(km$size)
+  #if(discPlot){par(mfrow=c(2,2))}
+  #else {par(mfrow=c(2,2))}
+  percsize = paste(1:nc," = ",format(km$size/sum(km$size)*100,digits=2),"%",sep="")
+  pie(km$size,labels=percsize,col=1:nc)
+  
+  gg = fviz_cluster(km, geom = "point", data = toClust) + ggtitle(paste("k =",nc))
+  print(gg)
+  #clusplot(toClust, km$cluster, color=TRUE, shade=TRUE,
+  #         labels=2, lines=0,col.clus=1:nc); #plot clusters against principal components
+  
+  if(discPlot){
+    plotcluster(toClust, km$cluster,col=km$cluster); #plot against discriminant functions ()
+  }
+  if(standardize){
+    kmc = (km$centers-rep(colMeans(toClust),each=nc))/rep(apply(toClust,2,sd),each=nc)
+    rng = range(kmc)
+    dist = rng[2]-rng[1]
+    locs = kmc+.05*dist*ifelse(kmc>0,1,-1)
+    par(mar=margins)
+    bm = barplot(kmc,col=1:nc,beside=TRUE,las=1,main="Cluster Means",ylim=rng+dist*c(-.1,.1),cex.names=0.8
+)
+    text(bm,locs,formatC(kmc,format="f",digits=1))
+  } else {
+    rng = range(km$centers)
+    dist = rng[2]-rng[1]
+    locs = km$centers+.05*dist*ifelse(km$centers>0,1,-1)
+    bm = barplot(km$centers,beside=TRUE,col=1:nc,main="Cluster Means",ylim=rng+dist*c(-.1,.1),cex.names=0.8
+)
+    text(bm,locs,formatC(km$centers,format="f",digits=1))
+  }
+  vs = data.table(Segment = 1:nrow(km$centers),km$centers,Size = km$size/sum(km$size))
+  vs[order(-Size),]
+}
+
+tmp = clustTest(toClust)
+
+clusts = runClusts(toClust,2:4)
+
+plotClust(clusts$kms[[1]],toClust)
+
+plotClust(clusts$kms[[2]],toClust)
+
+plotClust(clusts$kms[[3]],toClust)
+
+# K=3 is the 
+# the best product would price=1(lower price), size= 1(26). motion = 0(Bouncing), style = 0(Racing)
+# Best product would be profile 4
+```
+
+
+
+Provide comments about the results here.
+
+\section{Part C: A Priori Segmentation}
+
+Conduct a priori segmentation analyses using the variables gender and age in order to profile the attribute preferences based on these variables (use segment-level regressions). Test whether these a priori segmentation variables affect the part-utilities. What does this test tell you about these as segmentation schemes? If the differences are meaningful, profile the segment-level attribute preferences and identify the ideal product for each of the relevant a priori segments. See if you can identify any other strategic issues arising from the segmentation (e.g., menu pricing opportunities, competitive considerations, target/customization).
+
+```{r aPrioriSegmentation}
+##Provide code here
+NewData<-merge(conjointData,respondentData,by='ID')
+colnames(NewData) = c("ID","profile","ratings","price","hight","motion","style","age","gender")
+
+
+
+##Age segmentation regression: Age affects hight and motion especially hight
+##Parents with elder kid prefer rocking toys while parents with younger kid prefer bouncing toys
+##Parents with elder kid more prefer 26" toy
+SegAge = lm(ratings~(price+hight+motion+style)*age,data = NewData)
+summary(SegAge)
+age_3_4 = lm(ratings~(price+hight+motion+style), data = NewData[NewData$age == 1,])
+summary(age_3_4) 
+age_2 = lm(ratings~(price+hight+motion+style), data = NewData[NewData$age == 0,])
+summary(age_2)
+
+
+##Gender segmentation regression: Gender affects all the attribute especially style
+##Boys' are not sensitive in motion. They do prefer racing over glamorous
+##Boys' parents more price sensitive
+SegGender = lm(ratings~(price+hight+motion+style)*gender,data = NewData)
+summary(SegGender)
+gender_female = lm(ratings~(price+hight+motion+style), data = NewData[NewData$gender == 1,])
+summary(gender_female)
+gender_male = lm(ratings~(price+hight+motion+style), data = NewData[NewData$gender == 0,])
+summary(gender_male)
+
+#Best product would be profile#4 for Segment 1
+
+```
+
+Provide comments about the results here.
+
+\section{Part D: Market Simulation}
+
+Use disaggregate analysis with a first choice rule to forecast market shares for a decision-relevant set of scenarios. Using these market shares and the information about costs in the case, calculate profitability for each product in the product line as well as the overall profitability for the firm and competition. You should present at least 4 scenarios that try to identify the best possible product line strategy (policy) given considerations related to competitive response, cannibalization, profitability, and long-run profitability. Be sure to briefly justify why you chose the scenarios you chose to analyze!
+
+
+```{r }
+# Function 1 - simulates decisions for a market scenario using first choice disaggregate choice model
+ 
+##Return:
+##  data.frame of decisions with nrow=nrow(data), ncol=length(scen) 
+##    containing 1 or 0 and each row summing to 1 (one-hot encoding or dummy coded)
+simFCDecisions = function(scen, data, ascend = TRUE){ 
+  inmkt = data[ ,scen]                       # construct the subsetted matrix of options
+  if(ascend){                                # if the highest rating is the best
+    bestOpts = apply(inmkt, 1, which.max)    # identify which option is best = max
+  } else {                                   # else the best rank is the largest number
+    bestOpts = apply(inmkt, 1, which.min)    # identify which option is best = min
+  }
+  ret = as.data.frame(model.matrix(~0 + as.factor(bestOpts))) 
+  #fill to set of options marked 0 or 1
+  names(ret) = names(inmkt)
+  ret
+}
+# Function 2 - Calculates shares given decisions matrix
+##Return:
+##  a vector of shares
+#note this formulation can handle 1/0 decisions, split decisions, and quantity decisions
+calcUnitShares = function(decisions){
+  colSums(decisions)/sum(decisions) #assumes that total decisions is market size
+}
+
+
+# Function 3 - Market simluation (1 and 2)
+##Return:
+##  a vector of shares
+# note this formulation can handle 1/0 decisions, split decisions, and quantity decisions
+simFCShares=function(scen,data,ascend=TRUE){
+  decs = simFCDecisions(scen,data,ascend) #determine decisions
+  calcUnitShares(decs) #calculate shares and return
+}
+```
+
+
+```{r marketSimulation}
+# Assumption: once we launch new low price products or replacement, the competitors' wholesale price will decrease.(from profile 7 to 8).
+# Based on Part B and Part C, the potential new products will be profile 4, 12,14, 16 to launch.
+# The local retailers generally carry only 3 models, so we assume that we can only have two products at most.
+library(reshape)
+
+ratingTable <- data.frame(cast(conjointData, ID ~ profile, value="ratings"))
+ratingTable = ratingTable[, -1]
+colnames(ratingTable) <- unique(conjointData$profile)
+
+scens = list()
+# TYPE 1
+## existing 
+scens[[1]]=c(5,13,7)  
+
+# TYPE 2
+## One Existing Product & One Ideal Product
+scens[[2]]= c(13,4,8)
+scens[[3]]= c(13,12,8) 
+scens[[4]] = c(13,14,8) 
+scens[[5]] = c(13,16,8) 
+scens[[6]] = c(5,4,8) 
+scens[[7]] =c(5,12,8) 
+scens[[8]] = c(5,14,8) 
+scens[[9]] = c(5,16,8) 
+
+# TYPE 3
+## No Existing Product & Two Ideal Products
+scens[[10]] = c(4,12,8)
+scens[[11]] = c(4,14,8)
+scens[[12]] = c(4,16,8)
+scens[[13]] = c(12,14,8)
+scens[[14]] = c(12,16,8)
+scens[[15]] = c(14,16,8)
+
+# creating the market share and adding to scenario table
+
+simScenarios = function(scens,data,...){
+  res = matrix(nrow=length(scens),ncol=length(data)) #sets everything to NA by default
+  for(i in 1:length(scens)){ ##loop over scenarios
+    res[i, scens[[i]] ] = simFCShares(scens[[i]],data,...)
+    ##  calculate market shares and save to right columns in res for the scenario
+  }
+  res = as.data.frame(res); names(res) = names(data) #setting type and names
+  res ##return result table
+}
+
+
+# Scenario Market Table
+sim_market <- simScenarios(scens,ratingTable)[,c(5,4,12,14,16,13,7,8)]
+
+# Calculate Market Share===
+for (i in 1:length(scens)) {
+  sim_market$mktShare[i] <- sum(sim_market[i,c(1:6)],na.rm = TRUE)
+}
+
+# Variable Cost for product==
+profilesData$varCost[profilesData$size==0 & profilesData$motion==1] = 33 # 18" Rocking
+profilesData$varCost[profilesData$size==1 & profilesData$motion==1] = 41 # 26" Rocking
+profilesData$varCost[profilesData$size==0 & profilesData$motion==0] = 21 # 18" Bouncing
+profilesData$varCost[profilesData$size==1 & profilesData$motion==0] = 29 # 26" Bouncing
+
+# Revenue for product (wholesale price)
+profilesData$revenue[profilesData$price == 1] = 111.99 # wholesale price for $139.99 retail price
+profilesData$revenue[profilesData$price == 0] = 95.99 # wholesale price for $119.99 retail price
+
+# Calculate total First yearFixed Cost
+for (i in 1:length(scens)) {
+  sim_market$fyTotalFC[i] <- 40000 + ifelse(is.na(sim_market[i,1])==TRUE,7000,0) + ifelse(is.na(sim_market[i,6])==TRUE,7000,0)
+}
+
+# Calculate total Variable Cost
+vcTable <- profilesData[as.numeric(colnames(sim_market[c(1:6)])),"varCost"]
+sim_market_0 <- sim_market
+sim_market_0[is.na(sim_market_0)] <- 0
+sim_market$totalVC <- 0
+for (i in 1:length(scens)) {
+  for (j in 1:6) {
+        sim_market$totalVC[i] = sim_market$totalVC[i] + 4000 * sim_market_0[i,j] * vcTable[j]
+  }
+}
+
+# Calculate Second year total Fixed Cost
+for (i in 1:length(scens)) {
+  sim_market$syTotalFC[i] <- 40000
+}
+
+
+# Calculate total Revenue
+revTable <- profilesData[as.numeric(colnames(sim_market[c(1:6)])),"revenue"]
+sim_market$totalRev <- 0
+for (i in 1:length(scens)) {
+  for (j in 1:6) {
+        sim_market$totalRev[i] = sim_market$totalRev[i] + 4000 * sim_market_0[i,j] * revTable[j]
+  }
+}
+
+# Calculate First year profit
+sim_market$firstYearProfit <- 0
+sim_market$firstYearProfit <- sim_market$totalRev - sim_market$fyTotalFC- sim_market$totalVC
+
+# Calculate Second year profit
+sim_market$secondYearProfit <- 0
+sim_market$secondYearProfit <- sim_market$totalRev - sim_market$syTotalFC- sim_market$totalVC
+
+
+sim_market <- sim_market[, -(11:14)]
+
+```
+
+Provide justification for and comments about the scenario outcomes here and the policy you are recommending here. 
