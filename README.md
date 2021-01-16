@@ -1,5 +1,5 @@
 # New-Products-Analysis-for-Early-Riders-Toy-Horse-Manufacture-with-R
-•	Analyzed a conjoint experience and created a software product in R for a toy company to revitalize their product portfolio.
-•	Conducted a Benefit Segmentation via Cluster Analysis of Conjoint Part-Utilities and a Priori Segmentation by segment-level regressions to identify the ideal product for each segment. 
-•	Simulated market shares for 15 different product-line scenarios by using disaggregate analysis to forecast market shares.
-•	Identified the best possible product line strategy given considerations related to competitive response, cannibalization, profitability, and long-run profitability.
+•	Examined conjoint experiment and created a software product in R for a toy company to revitalize its product portfolio.
+•	Shaped the ideal product for each segment by conducting a Benefit Segmentation via K-Means Clustering and a Priori Segmentation through segment-level regressions. 
+•	Forecasted market shares by simulating potential markets for 15 different product-line scenarios via disaggregate analysis.
+•	Generated the best product strategy considering the competitive response, cannibalization, and short-run & long-run profitability.
